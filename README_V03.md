@@ -78,26 +78,6 @@ contains itself. The selected SNP sites themselves were ascertained using all
 isolates; this is **not** independent validation. For a proper held-out
 benchmark, use separate isolates and FASTQs not used in site selection.
 
-## Scientific limitations
-
-- The Nexus tree is a BEAST MCC tree with time-scale branch lengths; EPA-ng
-  cannot interpret these as substitutions/site. v0.3 preserves its topology
-  but re-estimates branch lengths with RAxML-NG.
-- SNP-only alignment is subject to ascertainment bias. RAxML-NG uses
-  `GTR+G+ASC_LEWIS` for branch optimization, whereas EPA-ng uses `GTR+G`.
-  These are not an identical likelihood model. EPA-ng likelihood weights
-  are therefore exploratory and **not calibrated confidence probabilities**.
-- Tree assignment uses the total EPA-ng placement likelihood weight on edges
-  that split off a pure cluster. Edges without a uniquely supported cluster
-  contribute to `unresolved_edge_weight`; ambiguous cases are not forced.
-- Branch placement does not necessarily identify the nearest tip, and its
-  likelihood weight is not the same as phylogenetic distance.
-- New isolate genotype calling uses the original mapping/calling implementation
-  and needs benchmarking on known FASTQ data; allele depth, ploidy, missingness
-  and mapping bias remain relevant.
-- `validate-placement` is CPU-intensive and is not run by the unit tests.
-- Do not interpret `cluster` as a clinical or biological diagnosis.
-
 ## Output files
 
 - `tree_report/tree_clusters.tsv`: cluster monophyly, MRCA contamination,
