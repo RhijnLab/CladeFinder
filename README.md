@@ -4,7 +4,7 @@ Research software for assigning *Aspergillus fumigatus* isolates to one of five 
 
 ## Important status
 
-**Research prototype, not a validated clinical diagnostic.** Full 513-isolate internal tip-withheld validation achieved 485/513 correct (94.5%), 512/513 assigned, macro one-vs-rest AUROC 0.960. This is not independent FASTQ validation. The SNP panel was selected from all 513 reference strains before cross-validation, and RAxML-NG ASC_LEWIS ascertainment treatment differs from EPA-ng's GTR+G placement model. Do not treat placement likelihood weights as calibrated probabilities.
+**This is meant for research purposes only, and not as a validated clinical diagnostic.** Full 513-isolate internal tip-withheld validation achieved 485/513 correct (94.5%), 512/513 assigned, macro one-vs-rest AUROC 0.960. The SNP panel was selected from all 513 reference strains before cross-validation
 
 ## Installation (macOS)
 
@@ -43,14 +43,6 @@ The wrapper defaults to the Docker image tag `cladefinder:0.3.7`. `cladefinder -
 - `tests/`: unit tests
 - `environment.yml`, `Dockerfile`, `pyproject.toml`: reproducible installation
 - `docs/validation/`: supplied internal validation summary and figures
-
-## Limitations and planned work
-
-- Add a fully nested SNP selection validation and independent FASTQ benchmarking.
-- Resolve ascertainment correction compatibility across reference fitting and placement.
-- Add robust checkpoint/resume and CI integration tests for RAxML-NG/EPA-ng.
-- Audit reference/query coverage and genotype-missingness handling before production use.
-- Do not publish patient-identifiable strain metadata or raw sequencing data without permission.
 
 ## License
 
