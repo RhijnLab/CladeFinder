@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""macOS runner: no bind mounts; Docker performs work on its own filesystem."""
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
+IMAGE = 'cladefinder:0.3.7'
+ARTIFACTS = ('reference_snps.fasta', 'nexus_topology.nwk', 'placement_tree.nwk', 'placement_model.txt', 'placement_manifest.json')
+
+
+def run(*args, capture=False):
+    cmd = ['docker', *map(str, args)]
+    if capture:
+        return subprocess.check_output(cmd, text=True).strip()
+    subprocess.run(cmd, check=True)
+
+
+def publish_artifacts(staged, target):
+    """Host-side preflight and atomic per-file replacement (never truncate originals)."""
+    staged, target = Path(staged), Path(target)
+    manifest = json.loads((staged / 'placement_manifest.json').read_text())
+    for name in ARTIFACTS:
+        src = staged / name
+        if not src.is_file() or src.stat().st_size == 0:
+            raise RuntimeError(f'Incomplete placement preparation: {name} missing/empty')
+    if manifest.get('tree') != 'placement_tree.nwk':
+        raise RuntimeError('Unexpected placement manifest tree')
+    with tempfile.TemporaryDirectory(prefix='.cladefinder-publish-', dir=target) as tmp:
+        pending = Path(tmp)
+        for name in ARTIFACTS:
+            shutil.copyfile(staged / name, pending / name)
+        # Commit marker is published last; consumers should require the manifest.
+        for name in ARTIFACTS:
+            os.replace(pending / name, target / name)
+
+
+def main():
+    p = argparse.ArgumentParser(description='Run CladeFinder inside Docker without macOS bind mounts')
+    p.add_argument('--image', default=IMAGE, help='Docker image tag')
+    commands = p.add_subparsers(dest='command', required=True)
+    prep = commands.add_parser('prepare', help='Prepare phylogenetic database')
+    prep.add_argument('data_dir', type=Path)
+    prep.add_argument('threads', nargs='?', type=int, default=4)
+    val = commands.add_parser('validate-placement', help='Run held-out EPA-ng validation')
+    val.add_argument('data_dir', type=Path)
+    val.add_argument('limit', nargs='?', type=int, default=5)
+    val.add_argument('threads', nargs='?', type=int, default=4)
+    classify = commands.add_parser('classify', help='Classify single/paired-end FASTQ')
+    classify.add_argument('data_dir', type=Path)
+    classify.add_argument('--r1', type=Path, required=True)
+    classify.add_argument('--r2', type=Path)
+    classify.add_argument('--sample')
+    classify.add_argument('--threads', type=int, default=4)
+    classify.add_argument('--phylogeny', choices=['off','auto','required'], default='auto')
+    args = p.parse_args()
+    root = args.data_dir.expanduser().resolve()
+    db = root / 'clade_db'
+    for required in ('database.json', 'reference.nex'):
+        if not (db / required).is_file():
+            p.error(f'Missing {db / required}')
+    if args.command == 'classify':
+        if not args.r1.expanduser().is_file() or (args.r2 and not args.r2.expanduser().is_file()):
+            p.error('FASTQ input not found')
+    container = None
+    try:
+        container = run('create', '--entrypoint', '/bin/sh', args.image, '-c', 'sleep 86400', capture=True)
+        run('start', container)
+        run('exec', '-u', 'root', container, 'mkdir', '-p', '/work')
+        print('Copying reference database into Docker (no host volume mount)...', flush=True)
+        run('cp', str(db), f'{container}:/work/clade_db')
+        run('exec', '-u', 'root', container, 'chown', '-R', 'mambauser:mambauser', '/work')
+        with tempfile.TemporaryDirectory(prefix='cladefinder-mac-') as tmp:
+            stage = Path(tmp)
+            if args.command == 'prepare':
+                run('exec', container, '/usr/local/bin/_entrypoint.sh', 'cladefinder', 'prepare-placement',
+                    '--database', '/work/clade_db', '--threads', args.threads)
+                run('cp', f'{container}:/work/clade_db/.', str(stage))
+                publish_artifacts(stage, db)
+                print(f'Success: placement files installed in {db}')
+            elif args.command == 'validate-placement':
+                run('exec', container, '/usr/local/bin/_entrypoint.sh', 'cladefinder', 'validate-placement',
+                    '--database', '/work/clade_db', '--output', '/work/placement-validation',
+                    '--limit', args.limit, '--threads', args.threads)
+                dest = root / 'placement-validation'
+                dest.mkdir(exist_ok=True)
+                run('cp', f'{container}:/work/placement-validation/.', str(dest))
+                print(f'Validation written to {dest}')
+            else:
+                run('exec', '-u', 'root', container, 'mkdir', '-p', '/work/fastq', '/work/results')
+                copied = []
+                for i, path in enumerate([args.r1, args.r2]):
+                    if path is not None:
+                        target = f'/work/fastq/read{i+1}.fastq.gz' if str(path).endswith('.gz') else f'/work/fastq/read{i+1}.fastq'
+                        run('cp', str(path.expanduser().resolve()), f'{container}:{target}')
+                        copied.append(target)
+                run('exec', '-u', 'root', container, 'chown', '-R', 'mambauser:mambauser', '/work/fastq', '/work/results')
+                cmd = ['exec', container, '/usr/local/bin/_entrypoint.sh', 'cladefinder', 'classify',
+                       '--database', '/work/clade_db', '--output', '/work/results', '--r1', copied[0],
+                       '--threads', args.threads, '--phylogeny', args.phylogeny]
+                if len(copied) == 2: cmd.extend(['--r2', copied[1]])
+                if args.sample: cmd.extend(['--sample', args.sample])
+                run(*cmd)
+                dest = root / 'results' / (args.sample or 'sample')
+                dest.mkdir(parents=True, exist_ok=True)
+                run('cp', f'{container}:/work/results/.', str(dest))
+                print(f'Classification written to {dest}')
+    except (subprocess.CalledProcessError, OSError, ValueError, RuntimeError) as exc:
+        print(f'ERROR: {exc}', file=sys.stderr)
+        return 1
+    finally:
+        if container:
+            subprocess.run(['docker', 'rm', '-f', container], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return 0
+
+if __name__ == '__main__':
+    sys.exit(main())

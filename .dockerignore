@@ -1,0 +1,10 @@
+.git
+*.vcf
+*.vcf.gz
+*.fastq*
+*.bam
+*.bai
+clade_db
+results
+example/reference/*
+!example/reference/.gitkeep

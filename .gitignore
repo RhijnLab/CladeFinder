@@ -1,0 +1,12 @@
+__pycache__/
+.pytest_cache/
+*.egg-info/
+*.vcf
+*.vcf.gz
+*.fastq
+*.fastq.gz
+*.bam
+*.bai
+clade_db/
+results/
+reference/
